@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bollettino Unico — Notifiche</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 20px; background:#14161a; color:#f6f4ee; }
+  h1 { font-size: 22px; }
+  input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #444; margin-bottom: 10px; background:#1e2126; color:#f6f4ee; font-size:15px; box-sizing:border-box; }
+  button { padding: 10px 16px; border-radius: 8px; border: none; background: #f2b705; color:#14161a; font-weight:700; cursor:pointer; }
+  #status { margin-top: 14px; font-size: 13.5px; color: #8a8f96; }
+</style>
+</head>
+<body>
+  <h1>Attiva le notifiche</h1>
+  <p>Inserisci le tratte da seguire (separate da virgola), es. <em>A4, Veneto</em></p>
+  <input id="tratte" placeholder="es. A4, Veneto">
+  <button onclick="attiva()">Attiva notifiche</button>
+  <p id="status"></p>
+
+<script>
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+}
+
+async function attiva() {
+  const statusEl = document.getElementById("status");
+  const tratteInput = document.getElementById("tratte").value;
+  const tratte = tratteInput.split(",").map(t => t.trim()).filter(Boolean);
+
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    statusEl.textContent = "Questo browser non supporta le notifiche push.";
+    return;
+  }
+  if (tratte.length === 0) {
+    statusEl.textContent = "Inserisci almeno una tratta.";
+    return;
+  }
+
+  try {
+    statusEl.textContent = "Registrazione in corso...";
+    const reg = await navigator.serviceWorker.register("/sw.js");
+
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      statusEl.textContent = "Permesso negato: non riceverai notifiche.";
+      return;
+    }
+
+    const { key } = await fetch("/api/vapid-public-key").then(r => r.json());
+    if (!key) {
+      statusEl.textContent = "Il server non ha ancora le chiavi VAPID configurate.";
+      return;
+    }
+
+    const subscription = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(key)
+    });
+
+    const res = await fetch("/api/iscrivi", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subscription, tratte })
+    });
+    const data = await res.json();
+
+    statusEl.textContent = "Notifiche attive per: " + data.tratte.join(", ");
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "Errore: " + err.message;
+  }
+}
+</script>
+</body>
+</html>
